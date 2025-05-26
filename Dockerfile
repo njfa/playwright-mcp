@@ -18,7 +18,7 @@ RUN --mount=type=cache,target=/root/.npm,sharing=locked,id=npm-cache \
     --mount=type=bind,source=package-lock.json,target=package-lock.json \
   npm ci --omit=dev && \
   # Install system dependencies for playwright
-  npx -y playwright-core install-deps chromium
+  npx -y playwright-core install-deps
 
 # ------------------------------
 # Builder
@@ -45,7 +45,7 @@ RUN npm run build
 # - Cache is reused when only source code changes
 FROM base AS browser
 
-RUN npx -y playwright-core install --no-shell chromium
+RUN npx -y playwright-core install --no-shell chromium chrome msedge webkit
 
 # ------------------------------
 # Runtime
@@ -62,6 +62,8 @@ RUN chown -R ${USERNAME}:${USERNAME} node_modules
 USER ${USERNAME}
 
 COPY --from=browser --chown=${USERNAME}:${USERNAME} ${PLAYWRIGHT_BROWSERS_PATH} ${PLAYWRIGHT_BROWSERS_PATH}
+COPY --from=browser --chown=${USERNAME}:${USERNAME} /opt/google/ /opt/google/
+COPY --from=browser --chown=${USERNAME}:${USERNAME} /opt/microsoft/ /opt/microsoft/
 COPY --chown=${USERNAME}:${USERNAME} cli.js package.json ./
 COPY --from=builder --chown=${USERNAME}:${USERNAME} /app/lib /app/lib
 
