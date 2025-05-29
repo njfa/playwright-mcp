@@ -13,12 +13,15 @@ ENV PLAYWRIGHT_BROWSERS_PATH=${PLAYWRIGHT_BROWSERS_PATH}
 # Set the working directory
 WORKDIR /app
 
+# Install system dependencies first (can be cached separately)
+RUN npx -y playwright-core install-deps chromium && \
+    rm -rf /var/lib/apt/lists/* /var/cache/apt/archives/*
+
+# Install production dependencies
 RUN --mount=type=cache,target=/root/.npm,sharing=locked,id=npm-cache \
     --mount=type=bind,source=package.json,target=package.json \
     --mount=type=bind,source=package-lock.json,target=package-lock.json \
-  npm ci --omit=dev && \
-  # Install system dependencies for playwright
-  npx -y playwright-core install-deps
+  npm ci --omit=dev
 
 # ------------------------------
 # Builder
@@ -45,27 +48,42 @@ RUN npm run build
 # - Cache is reused when only source code changes
 FROM base AS browser
 
-RUN npx -y playwright-core install --no-shell chromium chrome msedge webkit
+# Install browser
+# RUN npx -y playwright-core install --no-shell chromium
+RUN npx -y playwright-core install --no-shell chromium chrome
+# RUN npx -y playwright-core install --no-shell chromium chrome msedge
 
 # ------------------------------
 # Runtime
 # ------------------------------
-FROM base
+FROM node:22-bookworm-slim
 
 ARG PLAYWRIGHT_BROWSERS_PATH
 ARG USERNAME=node
 ENV NODE_ENV=production
+ENV PLAYWRIGHT_BROWSERS_PATH=${PLAYWRIGHT_BROWSERS_PATH}
 
-# Set the correct ownership for the runtime user on production `node_modules`
-RUN chown -R ${USERNAME}:${USERNAME} node_modules
+# Set the working directory
+WORKDIR /app
 
-USER ${USERNAME}
+# Install only chromium system dependencies
+RUN npx -y playwright-core@latest install-deps chromium && \
+    rm -rf /var/cache/apt/archives/* && \
+    apt-get clean
 
+# Copy production dependencies from base
+COPY --from=base --chown=${USERNAME}:${USERNAME} /app/node_modules /app/node_modules
+
+# Copy browser binaries
 COPY --from=browser --chown=${USERNAME}:${USERNAME} ${PLAYWRIGHT_BROWSERS_PATH} ${PLAYWRIGHT_BROWSERS_PATH}
 COPY --from=browser --chown=${USERNAME}:${USERNAME} /opt/google/ /opt/google/
-COPY --from=browser --chown=${USERNAME}:${USERNAME} /opt/microsoft/ /opt/microsoft/
+# COPY --from=browser --chown=${USERNAME}:${USERNAME} /opt/microsoft/ /opt/microsoft/
+
+# Copy built application
 COPY --chown=${USERNAME}:${USERNAME} cli.js package.json ./
 COPY --from=builder --chown=${USERNAME}:${USERNAME} /app/lib /app/lib
+
+USER ${USERNAME}
 
 # Run in headless and only with chromium (other browsers need more dependencies not included in this image)
 ENTRYPOINT ["node", "cli.js", "--headless", "--browser", "chromium", "--no-sandbox"]
